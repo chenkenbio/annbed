@@ -22,7 +22,10 @@ from tqdm import tqdm
 from multiprocessing import Process
 import random, string
 
-from .ops import bedtools_intersect, bedtools_closest, adjust_bed
+try:
+    from .ops import bedtools_intersect, bedtools_closest, adjust_bed
+except ImportError:
+    from ops import bedtools_intersect, bedtools_closest, adjust_bed
 
 
 """
@@ -79,6 +82,16 @@ class AnnotatedBED(object):
         self._peak_name2id = dict()
         self._peak_id2name = list()
         self.n_cols, self.header = self._prepare_bed(bed)
+    
+    def annotate(self):
+        annotate_bed(
+            self.bed, 
+            gene_db=GR_DB["hg38"], 
+            repeat_db=REPEAT_DB["hg38"],
+            repeat_stranded=False,
+            output=self._prefix + ".annotated.tsv",
+            ignore_ids=False
+        )
     
     @property
     def standardize_bed(self) -> str:
@@ -278,14 +291,14 @@ def _pair_peak_to_feature(bed, anno_bed, key_value: str, stranded: bool, up: int
     cmd = list()
     cmd.append(f"bedtools window -l {up} -r {down}")
     if stranded:
-        cmd.append("-sw")
+        cmd.append("-sw -sm")
 
-    cmd.append(f"-a {bed} -b {anno_bed}")
+    cmd.append(f"-b {bed} -a {anno_bed}")
     cmd.append(" > " + tmp_tsv)
     cmd = " ".join(cmd)
     # print("Running command:", cmd, file=sys.stderr)
     os.system(cmd)
-    bed_cols, _ = get_bed_info(bed)
+    bed_cols, _ = get_bed_info(anno_bed)
     n_cols = None
     pairs = dict()
     with open(tmp_tsv) as infile:
@@ -297,15 +310,17 @@ def _pair_peak_to_feature(bed, anno_bed, key_value: str, stranded: bool, up: int
                 n_cols = len(fields)
             else:
                 assert len(fields) == n_cols, "Number of columns is not consistent"
-            peak_key = get_peak_name(fields, use_loci, stranded=True)
+            peak_key = get_peak_name(fields[bed_cols:], use_loci, stranded=True)
             feature_key = key_extractor(fields)
             feature_type = type_extractor(fields)
             # calculate  distance
-            p_start, p_end = int(fields[1]), int(fields[2])
-            f_start, f_end = int(fields[bed_cols + 1]), int(fields[bed_cols + 2])
-            d = interval_distance((p_start, p_end), (f_start, f_end))
+            f_start, f_end = int(fields[1]), int(fields[2])
+            p_start, p_end = int(fields[bed_cols + 1]), int(fields[bed_cols + 2])
+            d = interval_distance((p_start, p_end), (f_start, f_end), ref="right")
             if not stranded:
                 d = abs(d)
+            elif fields[5] == "-":
+                d = -d
             if peak_key not in pairs:
                 pairs[peak_key] = list()
             pairs[peak_key].append((feature_key, feature_type, d))
@@ -327,18 +342,60 @@ GR_DB = {
             "TES": [os.path.join(HG38_GENE_PATH, "gencode.v46.TES.bed.gz"), (0, 3000), True],
         }
     }
+REPEAT_DB = {
+    "hg38": {
+        "repeat": [
+            os.path.join(f"{HOME}/db/repeatmasker/hg38_repeatmasker.v0.bed.gz"),
+            (0, 0),
+            False
+        ]
+    },
+}
 
-def annotate_bed(bed, *, db: Dict[str, Tuple[str, Tuple[int, int]]]=GR_DB["hg38"], output, in_memory: bool=True):
+
+def split_repeat_type_name(name: str) -> Tuple[str, str, str]:
+    """
+    Return:
+    - repeat type
+    - repeat family
+    - repeat class
+    """
+    rep_type = name
+    rep_family = name.split(',')[1]
+    rep_class = rep_family.split('/')[0]
+    return rep_type, rep_family, rep_class
+
+def annotate_bed(
+        bed, 
+        *, 
+        gene_db: Dict[str, Tuple[str, Tuple[int, int]]]=GR_DB["hg38"], 
+        repeat_db: Dict[str, Tuple[str, Tuple[int, int]]]=REPEAT_DB["hg38"],
+        repeat_stranded: bool=False,
+        output, 
+        ignore_ids: bool=False,
+        in_memory: bool=True):
+    db = dict()
+    for k, v in gene_db.items():
+        db[k] = v
+    for k, v in repeat_db.items():
+        if repeat_stranded:
+            db[k] = (v[0], v[1], True)
+        else:
+            db[k] = (v[0], v[1], False)
     links = OrderedDict()
     is_stranded = False
     for feature_type, (db_bed, (up, down), stranded) in db.items():
         if stranded:
             is_stranded = True
-        if feature_type in {"gene", "TSS", "anti-TSS", "CDS", "exon", "UTR3", "UTR5", "intron", "TES"}:
-            key_extractor = lambda x: (feature_type + "|" + x[-3].split('|')[0])
-            type_extractor = lambda x: x[-2]
+        if feature_type in {"gene"}:
+            key_extractor = lambda x: (feature_type + "|" + '/'.join(x[3].split('|')[0:2]))
+            type_extractor = lambda x: x[4]
+        elif feature_type in {"TSS", "anti-TSS", "CDS", "exon", "UTR3", "UTR5", "intron", "TES"}:
+            key_extractor = lambda x: (feature_type + "|" + '/'.join(x[3].split('|')[0:3]))
+            type_extractor = lambda x: x[4]
         elif feature_type == "repeat":
-            raise NotImplementedError
+            key_extractor = lambda x: x[3]
+            type_extractor = lambda x: split_repeat_type_name(x[4])
         else:
             raise ValueError(f"key {feature_type} not recognized")
 
@@ -359,10 +416,13 @@ def annotate_bed(bed, *, db: Dict[str, Tuple[str, Tuple[int, int]]]=GR_DB["hg38"
 
     for feature_type in links.keys():
         if feature_type == "repeat":
-            raise NotImplementedError
+            header.append("repeat_class\trepeat_family\trepeat_type")
+            if not ignore_ids:
+                header.append(f"{feature_type}_ids")
         else:
             header.append(f"{feature_type}")
-            header.append(f"{feature_type}_ids")
+            if not ignore_ids:
+                header.append(f"{feature_type}_ids")
     
     with auto_open(bed, 'rt') as infile, auto_open(output, 'wt') as outfile:
         print("\t".join(header), file=outfile)
@@ -371,18 +431,55 @@ def annotate_bed(bed, *, db: Dict[str, Tuple[str, Tuple[int, int]]]=GR_DB["hg38"
                 continue
             fields = l.rstrip().split("\t")
             peak_key = get_peak_name(fields, use_loci=True, stranded=is_stranded)
-            for feature_type, pairs in links.items():
+            for group, pairs in links.items():
                 feature_keys, feature_types = set(), set()
                 if peak_key in pairs:
                     for feature_key, feature_type, d in pairs[peak_key]:
-                        feature_keys.add(f"{feature_key}/{d}")
+                        feature_keys.add(f"{feature_key}|{d}")
                         feature_types.add(feature_type)
-                    feature_keys = ",".join(sorted(feature_keys))
-                    feature_types = ",".join(sorted(feature_types))
+                    feature_keys = ";".join(sorted(feature_keys))
+                    if group == "repeat":
+                        rep_types, rep_families, rep_classes = set(), set(), set()
+                        for (rtype, rfamily, rclass) in feature_types:
+                            rep_types.add(rtype)
+                            rep_families.add(rfamily)
+                            rep_classes.add(rclass)
+                        rep_types = ";".join(sorted(rep_types))
+                        rep_families = ";".join(sorted(rep_families))
+                        rep_classes = ";".join(sorted(rep_classes))
+                        feature_types = f"{rep_classes}\t{rep_families}\t{rep_types}"
+                    else:
+                        feature_types = ";".join(sorted(feature_types))
                 else:
-                    feature_keys = feature_types = "."
+                    if group == "repeat":
+                        feature_keys = "."
+                        feature_types = ".\t.\t."
+                    else:
+                        feature_keys, feature_types = ".", "."
                 fields.append(feature_types)
-                fields.append(feature_keys)
+                if not ignore_ids:
+                    fields.append(feature_keys)
+                # fields.append(feature_keys)
             print("\t".join(fields), file=outfile)
     return links
 
+def main():
+    p = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    p.add_argument("bed", help="Input bed file")
+    p.add_argument("--output", "-o", help="Output file")
+    p.add_argument("--gene-db", help="Gene database", default="hg38")
+    p.add_argument("--repeat-db", help="Repeat database", default="hg38")
+    p.add_argument("--repeat-stranded", action="store_true", help="Repeat database is stranded")
+    p.add_argument("--ignore-ids", action="store_true", help="Ignore IDs")
+    args = p.parse_args()
+    annotate_bed(
+        args.bed, 
+        gene_db=GR_DB[args.gene_db], 
+        repeat_db=REPEAT_DB[args.repeat_db],
+        repeat_stranded=args.repeat_stranded,
+        output=args.output,
+        ignore_ids=args.ignore_ids
+    )
+
+if __name__ == "__main__":
+    main()
