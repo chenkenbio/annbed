@@ -388,7 +388,7 @@ def annotate_bed(
         if stranded:
             is_stranded = True
         if feature_type in {"gene"}:
-            key_extractor = lambda x: (feature_type + "|" + '/'.join(x[3].split('|')[0:2]))
+            key_extractor = lambda x: (feature_type + "|" + '/'.join(x[3].split('|')[0:3]))
             type_extractor = lambda x: x[4]
         elif feature_type in {"TSS", "anti-TSS", "CDS", "exon", "UTR3", "UTR5", "intron", "TES"}:
             key_extractor = lambda x: (feature_type + "|" + '/'.join(x[3].split('|')[0:3]))
@@ -424,6 +424,7 @@ def annotate_bed(
             if not ignore_ids:
                 header.append(f"{feature_type}_ids")
     
+    print(bed)
     with auto_open(bed, 'rt') as infile, auto_open(output, 'wt') as outfile:
         print("\t".join(header), file=outfile)
         for l in infile:
@@ -466,7 +467,7 @@ def annotate_bed(
 def main():
     p = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     p.add_argument("bed", help="Input bed file")
-    p.add_argument("--output", "-o", help="Output file")
+    p.add_argument("--output", "-o", help="Output file", required=True)
     p.add_argument("--gene-db", help="Gene database", default="hg38")
     p.add_argument("--repeat-db", help="Repeat database", default="hg38")
     p.add_argument("--repeat-stranded", action="store_true", help="Repeat database is stranded")
