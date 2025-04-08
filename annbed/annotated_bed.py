@@ -41,6 +41,9 @@ HOME = os.environ.get("HOME", os.path.expanduser("~"))
 REPEAT_DB = {
     "hg38_all": os.path.join(
         f"{HOME}/db/repeatmasker/hg38_repeatmasker.v0.bed.gz"
+    ),
+    "mm10_all": os.path.join(
+        f"{HOME}/db/repeatmasker/mm10_repeatmasker.v0.bed.gz"
     )
 }
 
@@ -331,17 +334,28 @@ HOME = os.environ.get("HOME", os.path.expanduser("~"))
 HG38_GENE_PATH = f"{HOME}/db/gencode/GRCh38/v46/regions"
 GR_DB = {
     "hg38": {
-            "gene": [os.path.join(HG38_GENE_PATH, "gencode.v46.gene.bed.gz"), (0, 0), True], # path, (up, down), stranded
-            "TSS": [os.path.join(HG38_GENE_PATH, "gencode.v46.TSS.bed.gz"), (3000, 0), True],
-            "anti-TSS": [os.path.join(HG38_GENE_PATH, "gencode.v46.anti-TSS.bed.gz"), (0, 3000), True],
-            "CDS": [os.path.join(HG38_GENE_PATH, "gencode.v46.CDS.bed.gz"), (0, 0), True],
-            "exon": [os.path.join(HG38_GENE_PATH, "gencode.v46.exon.bed.gz"), (0, 0), True],
-            "UTR3": [os.path.join(HG38_GENE_PATH, "gencode.v46.UTR3.bed.gz"), (0, 0), True],
-            "UTR5": [os.path.join(HG38_GENE_PATH, "gencode.v46.UTR5.bed.gz"), (0, 0), True],
-            "intron": [os.path.join(HG38_GENE_PATH, "gencode.v46.intron.bed.gz"), (0, 0), True],
-            "TES": [os.path.join(HG38_GENE_PATH, "gencode.v46.TES.bed.gz"), (0, 3000), True],
-        }
+        "gene": [os.path.join(HG38_GENE_PATH, "gencode.v46.gene.bed.gz"), (0, 0), True], # path, (up, down), stranded
+        "TSS": [os.path.join(HG38_GENE_PATH, "gencode.v46.TSS.bed.gz"), (3000, 0), True],
+        "anti-TSS": [os.path.join(HG38_GENE_PATH, "gencode.v46.anti-TSS.bed.gz"), (0, 3000), True],
+        "CDS": [os.path.join(HG38_GENE_PATH, "gencode.v46.CDS.bed.gz"), (0, 0), True],
+        "exon": [os.path.join(HG38_GENE_PATH, "gencode.v46.exon.bed.gz"), (0, 0), True],
+        "UTR3": [os.path.join(HG38_GENE_PATH, "gencode.v46.UTR3.bed.gz"), (0, 0), True],
+        "UTR5": [os.path.join(HG38_GENE_PATH, "gencode.v46.UTR5.bed.gz"), (0, 0), True],
+        "intron": [os.path.join(HG38_GENE_PATH, "gencode.v46.intron.bed.gz"), (0, 0), True],
+        "TES": [os.path.join(HG38_GENE_PATH, "gencode.v46.TES.bed.gz"), (0, 3000), True],
+    },
+    "mm10": {
+        "gene": ["/home/kenchen/db/gencode/GRCm38/vM25/gencode.vM25.gene.bed.gz", (0, 0), True],
+        "TSS": ["/home/kenchen/db/gencode/GRCm38/vM25/gencode.vM25.TSS.bed.gz", (3000, 0), True],
+        "anti-TSS": ["/home/kenchen/db/gencode/GRCm38/vM25/gencode.vM25.anti-TSS.bed.gz", (0, 3000), True],
+        "CDS": ["/home/kenchen/db/gencode/GRCm38/vM25/gencode.vM25.CDS.bed.gz", (0, 0), True],
+        "exon": ["/home/kenchen/db/gencode/GRCm38/vM25/gencode.vM25.exon.bed.gz", (0, 0), True],
+        "UTR3": ["/home/kenchen/db/gencode/GRCm38/vM25/gencode.vM25.UTR3.bed.gz", (0, 0), True],
+        "UTR5": ["/home/kenchen/db/gencode/GRCm38/vM25/gencode.vM25.UTR5.bed.gz", (0, 0), True],
+        "intron": ["/home/kenchen/db/gencode/GRCm38/vM25/gencode.vM25.intron.bed.gz", (0, 0), True],
+        "TES": ["/home/kenchen/db/gencode/GRCm38/vM25/gencode.vM25.TES.bed.gz", (0, 3000), True],
     }
+}
 REPEAT_DB = {
     "hg38": {
         "repeat": [
@@ -350,6 +364,13 @@ REPEAT_DB = {
             False
         ]
     },
+    "mm10": {
+        "repeat": [
+            os.path.join(f"{HOME}/db/repeatmasker/mm10_repeatmasker.v0.bed.gz"),
+            (0, 0),
+            False
+            ]
+        }
 }
 
 
@@ -419,6 +440,10 @@ def annotate_bed(
             header.append("repeat_class\trepeat_family\trepeat_type")
             if not ignore_ids:
                 header.append(f"{feature_type}_ids")
+        elif feature_type == "gene":
+            header.append("gene")
+            if not ignore_ids:
+                header.append(f"{feature_type}_ids")
         else:
             header.append(f"{feature_type}")
             if not ignore_ids:
@@ -468,11 +493,30 @@ def main():
     p = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     p.add_argument("bed", help="Input bed file")
     p.add_argument("--output", "-o", help="Output file", required=True)
-    p.add_argument("--gene-db", help="Gene database", default="hg38")
-    p.add_argument("--repeat-db", help="Repeat database", default="hg38")
+    p.add_argument("--gene-db", help="Gene database", default="hg38", choices=["hg38", "mm10"], required=True)
+    p.add_argument("--repeat-db", help="Repeat database", default="hg38", choices=["hg38", "mm10"], required=True)
     p.add_argument("--repeat-stranded", action="store_true", help="Repeat database is stranded")
     p.add_argument("--ignore-ids", action="store_true", help="Ignore IDs")
+    p.add_argument("--region-from", choices=["bed", "index"], default="bed", help="Genomic region to annotate")
+    p.add_argument("--header", choices=("Y", "N"), help="Header in the input bed file")
     args = p.parse_args()
+    if args.region_from == "index":
+        assert args.header is not None, "Header should be provided if region_from is index"
+        tmp_bed = os.path.join(TMPDIR, f"{os.path.basename(args.bed)}" + "." + random_string())
+        with open(args.bed, 'rt') as infile, open(tmp_bed, 'wt') as outfile:
+            for nr, l in enumerate(infile):
+                fields = l.rstrip().split("\t")
+                if nr == 0 and args.header == "Y":
+                    print("#chrom\tstart\tend\tname\tname2\tstrand\t" + '\t'.join(fields[1:]), file=outfile)
+                else:
+                    chrom, start, end, strand = fields[0].split("_")
+                    name = fields[0]
+                    print(f"{chrom}\t{start}\t{end}\t{name}\t{name}\t{strand}\t" + '\t'.join(fields[1:]), file=outfile)
+        print(f"Using {tmp_bed} as input", file=sys.stderr)
+        args.bed = tmp_bed
+    else:
+        tmp_bed = None
+
     annotate_bed(
         args.bed, 
         gene_db=GR_DB[args.gene_db], 
@@ -481,6 +525,8 @@ def main():
         output=args.output,
         ignore_ids=args.ignore_ids
     )
+    # if tmp_bed:
+    #     os.system(f"rm -f {tmp_bed}")
 
 if __name__ == "__main__":
     main()
